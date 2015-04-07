@@ -1,19 +1,20 @@
-#include <OneWire.h>
+#include <DS2480B.h>
 #include <DallasTemperature.h>
+#include <AltSoftSerial.h>
 
-// Data wire is plugged into port 2 on the Arduino
-#define ONE_WIRE_BUS 2
+AltSoftSerial altSerial; //pins 8 and 9
 
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
-OneWire oneWire(ONE_WIRE_BUS);
+DS2480B ds(altSerial);
 
 // Pass our oneWire reference to Dallas Temperature. 
-DallasTemperature sensors(&oneWire);
+DallasTemperature sensors(&ds);
 
 void setup(void)
 {
   // start serial port
   Serial.begin(9600);
+  altSerial.begin(9600);
   Serial.println("Dallas Temperature IC Control Library Demo");
 
   // Start up the library
@@ -28,6 +29,6 @@ void loop(void)
   sensors.requestTemperatures(); // Send the command to get temperatures
   Serial.println("DONE");
   
-  Serial.print("Temperature for the device 1 (index 0) is: ");
-  Serial.println(sensors.getTempCByIndex(0));  
+  Serial.print("Temperature for the device 2 (index 1) is: ");
+  Serial.println(sensors.getTempCByIndex(1));  
 }

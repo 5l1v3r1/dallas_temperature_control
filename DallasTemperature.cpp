@@ -17,10 +17,7 @@ extern "C" {
 }
 #endif
 
-DallasTemperature::DallasTemperature(OneWire* _oneWire)
-  #if REQUIRESALARMS
-  : _AlarmHandler(&defaultAlarmHandler)
-  #endif
+DallasTemperature::DallasTemperature(DS2480B* _oneWire)
 {
   _wire = _oneWire;
   devices = 0;
@@ -34,7 +31,9 @@ DallasTemperature::DallasTemperature(OneWire* _oneWire)
 void DallasTemperature::begin(void)
 {
   DeviceAddress deviceAddress;
+  uint8_t count;
 
+  _wire->begin();
   _wire->reset_search();
   devices = 0; // Reset the number of devices when we enumerate wire devices
 
@@ -42,14 +41,19 @@ void DallasTemperature::begin(void)
   {
     if (validAddress(deviceAddress))
     {
-      if (!parasite && readPowerSupply(deviceAddress)) parasite = true;
+	  for (count = 0; count < 8; count++) sensors[devices].address[count] = deviceAddress[count];
+	  sensors[devices].minTemp = 0;
+	  sensors[devices].maxTemp = 0;
+	  sensors[devices].avgTemp = 0;
+	  sensors[devices].avgTempAccumulator = 0;
+
+      if (!parasite && readPowerSupply(devices)) parasite = true;
 
       ScratchPad scratchPad;
 
-      readScratchPad(deviceAddress, scratchPad);
+      readScratchPad(devices, scratchPad);
 
-	  bitResolution = max(bitResolution, getResolution(deviceAddress));
-
+	  bitResolution = max(bitResolution, getResolution(devices));
       devices++;
     }
   }
@@ -67,44 +71,30 @@ bool DallasTemperature::validAddress(uint8_t* deviceAddress)
   return (_wire->crc8(deviceAddress, 7) == deviceAddress[7]);
 }
 
-// finds an address at a given index on the bus
-// returns true if the device was found
-bool DallasTemperature::getAddress(uint8_t* deviceAddress, uint8_t index)
-{
-  uint8_t depth = 0;
-
-  _wire->reset_search();
-
-  while (depth <= index && _wire->search(deviceAddress))
-  {
-    if (depth == index && validAddress(deviceAddress)) return true;
-    depth++;
-  }
-
-  return false;
-}
-
 // attempt to determine if the device at the given address is connected to the bus
-bool DallasTemperature::isConnected(uint8_t* deviceAddress)
+bool DallasTemperature::isConnected(uint8_t index)
 {
   ScratchPad scratchPad;
-  return isConnected(deviceAddress, scratchPad);
+  return isConnected(index, scratchPad);
 }
 
 // attempt to determine if the device at the given address is connected to the bus
 // also allows for updating the read scratchpad
-bool DallasTemperature::isConnected(uint8_t* deviceAddress, uint8_t* scratchPad)
+bool DallasTemperature::isConnected(uint8_t index, uint8_t* scratchPad)
 {
-  readScratchPad(deviceAddress, scratchPad);
+  readScratchPad(index, scratchPad);
   return (_wire->crc8(scratchPad, 8) == scratchPad[SCRATCHPAD_CRC]);
 }
 
 // read device's scratch pad
-void DallasTemperature::readScratchPad(uint8_t* deviceAddress, uint8_t* scratchPad)
+void DallasTemperature::readScratchPad(uint8_t index, uint8_t* scratchPad)
 {
+	if (index >= devices) index = 0;
+	int32_t temp;
+	int16_t returnedTemp;
   // send the command
   _wire->reset();
-  _wire->select(deviceAddress);
+  _wire->select(sensors[index].address);
   _wire->write(READSCRATCH);
 
   // TODO => collect all comments &  use simple loop
@@ -164,19 +154,28 @@ void DallasTemperature::readScratchPad(uint8_t* deviceAddress, uint8_t* scratchP
   // SCTRACHPAD_CRC
   scratchPad[SCRATCHPAD_CRC] = _wire->read();
 
+  returnedTemp = (int16_t)scratchPad[TEMP_LSB] + (scratchPad[TEMP_MSB] * 256);
+
+  //returnedTemp now stores the raw value which is either in 1/2, 1/4, 1/8, or 1/16 of a degree. Need to figure that out and scale up to hundredths of a degree instead
+  temp = (int32_t)returnedTemp * 100;
+  temp /= (1 << (bitResolution - 8));
+
+  sensors[index].currentTemp = (int16_t) temp;
+
   _wire->reset();
 }
 
 // writes device's scratch pad
-void DallasTemperature::writeScratchPad(uint8_t* deviceAddress, const uint8_t* scratchPad)
+void DallasTemperature::writeScratchPad(uint8_t index, const uint8_t* scratchPad)
 {
+  if (index >= devices) index = 0;
   _wire->reset();
-  _wire->select(deviceAddress);
+  _wire->select(sensors[index].address);
   _wire->write(WRITESCRATCH);
   _wire->write(scratchPad[HIGH_ALARM_TEMP]); // high alarm temp
   _wire->write(scratchPad[LOW_ALARM_TEMP]); // low alarm temp
   // DS18S20 does not use the configuration register
-  if (deviceAddress[0] != DS18S20MODEL) _wire->write(scratchPad[CONFIGURATION]); // configuration
+  if (sensors[index].address[0] != DS18S20MODEL) _wire->write(scratchPad[CONFIGURATION]); // configuration
   _wire->reset();
   // save the newly written values to eeprom
   _wire->write(COPYSCRATCH, parasite);
@@ -185,11 +184,12 @@ void DallasTemperature::writeScratchPad(uint8_t* deviceAddress, const uint8_t* s
 }
 
 // reads the device's power requirements
-bool DallasTemperature::readPowerSupply(uint8_t* deviceAddress)
+bool DallasTemperature::readPowerSupply(uint8_t index)
 {
+  if (index >= devices) index = 0;
   bool ret = false;
   _wire->reset();
-  _wire->select(deviceAddress);
+  _wire->select(sensors[index].address);
   _wire->write(READPOWERSUPPLY);
   if (_wire->read_bit() == 0) ret = true;
   _wire->reset();
@@ -202,23 +202,21 @@ bool DallasTemperature::readPowerSupply(uint8_t* deviceAddress)
 void DallasTemperature::setResolution(uint8_t newResolution)
 {
   bitResolution = constrain(newResolution, 9, 12);
-  DeviceAddress deviceAddress;
   for (int i=0; i<devices; i++)
   {
-    getAddress(deviceAddress, i);
-	setResolution(deviceAddress, bitResolution);
+	setResolution(i, bitResolution);
   }
 }
 
 // set resolution of a device to 9, 10, 11, or 12 bits
 // if new resolution is out of range, 9 bits is used. 
-bool DallasTemperature::setResolution(uint8_t* deviceAddress, uint8_t newResolution)
+bool DallasTemperature::setResolution(uint8_t index, uint8_t newResolution)
 {
   ScratchPad scratchPad;
-  if (isConnected(deviceAddress, scratchPad))
+  if (isConnected(index, scratchPad))
   {
     // DS18S20 has a fixed 9-bit resolution
-    if (deviceAddress[0] != DS18S20MODEL)
+    if (sensors[index].address[0] != DS18S20MODEL)
     {
       switch (newResolution)
       {
@@ -236,7 +234,7 @@ bool DallasTemperature::setResolution(uint8_t* deviceAddress, uint8_t newResolut
           scratchPad[CONFIGURATION] = TEMP_9_BIT;
           break;
       }
-      writeScratchPad(deviceAddress, scratchPad);
+      writeScratchPad(index, scratchPad);
     }
 	return true;  // new value set
   }
@@ -251,12 +249,13 @@ uint8_t DallasTemperature::getResolution()
 
 // returns the current resolution of the device, 9-12
 // returns 0 if device not found
-uint8_t DallasTemperature::getResolution(uint8_t* deviceAddress)
+uint8_t DallasTemperature::getResolution(uint8_t index)
 {
-  if (deviceAddress[0] == DS18S20MODEL) return 9; // this model has a fixed resolution
+  if (index >= devices) index = 0;
+  if (sensors[index].address[0] == DS18S20MODEL) return 9; // this model has a fixed resolution
 
   ScratchPad scratchPad;
-  if (isConnected(deviceAddress, scratchPad))
+  if (isConnected(index, scratchPad))
   {
 	switch (scratchPad[CONFIGURATION])
     {
@@ -309,11 +308,12 @@ bool DallasTemperature::getCheckForConversion()
 	return checkForConversion;
 }
 
-bool DallasTemperature::isConversionAvailable(uint8_t* deviceAddress)
+bool DallasTemperature::isConversionAvailable(uint8_t index)
 {
+	if (index >= devices) index = 0;
 	// Check if the clock has been raised indicating the conversion is complete
   	ScratchPad scratchPad;
-  	readScratchPad(deviceAddress, scratchPad);
+  	readScratchPad(index, scratchPad);
 	return scratchPad[0];
 }	
 
@@ -335,30 +335,31 @@ void DallasTemperature::requestTemperatures()
 // sends command for one device to perform a temperature by address
 // returns FALSE if device is disconnected
 // returns TRUE  otherwise
-bool DallasTemperature::requestTemperaturesByAddress(uint8_t* deviceAddress)
+bool DallasTemperature::requestTemperaturesByAddress(uint8_t index)
 {
-
+  if (index >= devices) index = 0;
   _wire->reset();
-  _wire->select(deviceAddress);
+  _wire->select(sensors[index].address);
   _wire->write(STARTCONVO, parasite);
   
     // check device
   ScratchPad scratchPad;
-  if (!isConnected(deviceAddress, scratchPad)) return false;
+  if (!isConnected(index, scratchPad)) return false;
   
   
   // ASYNC mode?
   if (!waitForConversion) return true;   
-  uint8_t bitResolution = getResolution(deviceAddress);
-  blockTillConversionComplete(&bitResolution, deviceAddress);
+  uint8_t bitResolution = getResolution(index);
+  blockTillConversionComplete(&bitResolution, index);
   
   return true;
 }
 
 
-void DallasTemperature::blockTillConversionComplete(uint8_t* bitResolution, uint8_t* deviceAddress)
+void DallasTemperature::blockTillConversionComplete(uint8_t* bitResolution, uint8_t index)
 {
-	if(deviceAddress != 0 && checkForConversion && !parasite)
+	delay(1000);
+	if (checkForConversion && !parasite)
 	{
 	  	// Continue to check if the IC has responded with a temperature
 	  	// NB: Could cause issues with multiple devices (one device may respond faster)
@@ -389,17 +390,13 @@ void DallasTemperature::blockTillConversionComplete(uint8_t* bitResolution, uint
 // sends command for one device to perform a temp conversion by index
 bool DallasTemperature::requestTemperaturesByIndex(uint8_t deviceIndex)
 {
-  DeviceAddress deviceAddress;
-  getAddress(deviceAddress, deviceIndex);
-  return requestTemperaturesByAddress(deviceAddress);
+  return requestTemperaturesByAddress(deviceIndex);
 }
 
 // Fetch temperature for device index
 float DallasTemperature::getTempCByIndex(uint8_t deviceIndex)
 {
-  DeviceAddress deviceAddress;
-  getAddress(deviceAddress, deviceIndex);
-  return getTempC((uint8_t*)deviceAddress);
+  return getTempC(deviceIndex);
 }
 
 // Fetch temperature for device index
@@ -409,11 +406,12 @@ float DallasTemperature::getTempFByIndex(uint8_t deviceIndex)
 }
 
 // reads scratchpad and returns the temperature in degrees C
-float DallasTemperature::calculateTemperature(uint8_t* deviceAddress, uint8_t* scratchPad)
+float DallasTemperature::calculateTemperature(uint8_t index, uint8_t* scratchPad)
 {
+  if (index >= devices) index = 0;
   int16_t rawTemperature = (((int16_t)scratchPad[TEMP_MSB]) << 8) | scratchPad[TEMP_LSB];
 
-  switch (deviceAddress[0])
+  switch (sensors[index].address[0])
   {
     case DS18B20MODEL:
     case DS1822MODEL:
@@ -460,23 +458,24 @@ float DallasTemperature::calculateTemperature(uint8_t* deviceAddress, uint8_t* s
 // the numeric value of DEVICE_DISCONNECTED is defined in
 // DallasTemperature.h. It is a large negative number outside the
 // operating range of the device
-float DallasTemperature::getTempC(uint8_t* deviceAddress)
+float DallasTemperature::getTempC(uint8_t index)
 {
+  if (index >= devices) index = 0;
   // TODO: Multiple devices (up to 64) on the same bus may take 
   //       some time to negotiate a response
   // What happens in case of collision?
 
   ScratchPad scratchPad;
-  if (isConnected(deviceAddress, scratchPad)) return calculateTemperature(deviceAddress, scratchPad);
+  if (isConnected(index, scratchPad)) return calculateTemperature(index, scratchPad);
   return DEVICE_DISCONNECTED;
 }
 
 // returns temperature in degrees F
 // TODO: - when getTempC returns DEVICE_DISCONNECTED 
 //        -127 gets converted to -196.6 F
-float DallasTemperature::getTempF(uint8_t* deviceAddress)
+float DallasTemperature::getTempF(uint8_t index)
 {
-  return toFahrenheit(getTempC(deviceAddress));
+  return toFahrenheit(getTempC(index));
 }
 
 // returns true if the bus requires parasite power
@@ -484,222 +483,6 @@ bool DallasTemperature::isParasitePowerMode(void)
 {
   return parasite;
 }
-
-#if REQUIRESALARMS
-
-/*
-
-ALARMS:
-
-TH and TL Register Format
-
-BIT 7 BIT 6 BIT 5 BIT 4 BIT 3 BIT 2 BIT 1 BIT 0
-  S    2^6   2^5   2^4   2^3   2^2   2^1   2^0
-
-Only bits 11 through 4 of the temperature register are used
-in the TH and TL comparison since TH and TL are 8-bit
-registers. If the measured temperature is lower than or equal
-to TL or higher than or equal to TH, an alarm condition exists
-and an alarm flag is set inside the DS18B20. This flag is
-updated after every temperature measurement; therefore, if the
-alarm condition goes away, the flag will be turned off after
-the next temperature conversion.
-
-*/
-
-// sets the high alarm temperature for a device in degrees celsius
-// accepts a float, but the alarm resolution will ignore anything
-// after a decimal point.  valid range is -55C - 125C
-void DallasTemperature::setHighAlarmTemp(uint8_t* deviceAddress, char celsius)
-{
-  // make sure the alarm temperature is within the device's range
-  if (celsius > 125) celsius = 125;
-  else if (celsius < -55) celsius = -55;
-
-  ScratchPad scratchPad;
-  if (isConnected(deviceAddress, scratchPad))
-  {
-    scratchPad[HIGH_ALARM_TEMP] = (uint8_t)celsius;
-    writeScratchPad(deviceAddress, scratchPad);
-  }
-}
-
-// sets the low alarm temperature for a device in degreed celsius
-// accepts a float, but the alarm resolution will ignore anything
-// after a decimal point.  valid range is -55C - 125C
-void DallasTemperature::setLowAlarmTemp(uint8_t* deviceAddress, char celsius)
-{
-  // make sure the alarm temperature is within the device's range
-  if (celsius > 125) celsius = 125;
-  else if (celsius < -55) celsius = -55;
-
-  ScratchPad scratchPad;
-  if (isConnected(deviceAddress, scratchPad))
-  {
-    scratchPad[LOW_ALARM_TEMP] = (uint8_t)celsius;
-    writeScratchPad(deviceAddress, scratchPad);
-  }
-}
-
-// returns a char with the current high alarm temperature or
-// DEVICE_DISCONNECTED for an address
-char DallasTemperature::getHighAlarmTemp(uint8_t* deviceAddress)
-{
-  ScratchPad scratchPad;
-  if (isConnected(deviceAddress, scratchPad)) return (char)scratchPad[HIGH_ALARM_TEMP];
-  return DEVICE_DISCONNECTED;
-}
-
-// returns a char with the current low alarm temperature or
-// DEVICE_DISCONNECTED for an address
-char DallasTemperature::getLowAlarmTemp(uint8_t* deviceAddress)
-{
-  ScratchPad scratchPad;
-  if (isConnected(deviceAddress, scratchPad)) return (char)scratchPad[LOW_ALARM_TEMP];
-  return DEVICE_DISCONNECTED;
-}
-
-// resets internal variables used for the alarm search
-void DallasTemperature::resetAlarmSearch()
-{
-  alarmSearchJunction = -1;
-  alarmSearchExhausted = 0;
-  for(uint8_t i = 0; i < 7; i++)
-    alarmSearchAddress[i] = 0;
-}
-
-// This is a modified version of the OneWire::search method.
-//
-// Also added the OneWire search fix documented here:
-// http://www.arduino.cc/cgi-bin/yabb2/YaBB.pl?num=1238032295
-//
-// Perform an alarm search. If this function returns a '1' then it has
-// enumerated the next device and you may retrieve the ROM from the
-// OneWire::address variable. If there are no devices, no further
-// devices, or something horrible happens in the middle of the
-// enumeration then a 0 is returned.  If a new device is found then
-// its address is copied to newAddr.  Use
-// DallasTemperature::resetAlarmSearch() to start over.
-bool DallasTemperature::alarmSearch(uint8_t* newAddr)
-{
-  uint8_t i;
-  char lastJunction = -1;
-  uint8_t done = 1;
-
-  if (alarmSearchExhausted) return false;
-  if (!_wire->reset()) return false;
-
-  // send the alarm search command
-  _wire->write(0xEC, 0);
-
-  for(i = 0; i < 64; i++)
-  {
-    uint8_t a = _wire->read_bit( );
-    uint8_t nota = _wire->read_bit( );
-    uint8_t ibyte = i / 8;
-    uint8_t ibit = 1 << (i & 7);
-
-    // I don't think this should happen, this means nothing responded, but maybe if
-    // something vanishes during the search it will come up.
-    if (a && nota) return false;
-
-    if (!a && !nota)
-    {
-      if (i == alarmSearchJunction)
-      {
-        // this is our time to decide differently, we went zero last time, go one.
-        a = 1;
-        alarmSearchJunction = lastJunction;
-      }
-      else if (i < alarmSearchJunction)
-      {
-        // take whatever we took last time, look in address
-        if (alarmSearchAddress[ibyte] & ibit) a = 1;
-        else
-        {
-          // Only 0s count as pending junctions, we've already exhasuted the 0 side of 1s
-          a = 0;
-          done = 0;
-          lastJunction = i;
-        }
-      }
-      else
-      {
-        // we are blazing new tree, take the 0
-        a = 0;
-        alarmSearchJunction = i;
-        done = 0;
-      }
-      // OneWire search fix
-      // See: http://www.arduino.cc/cgi-bin/yabb2/YaBB.pl?num=1238032295
-    }
-
-    if (a) alarmSearchAddress[ibyte] |= ibit;
-    else alarmSearchAddress[ibyte] &= ~ibit;
-
-    _wire->write_bit(a);
-  }
-
-  if (done) alarmSearchExhausted = 1;
-  for (i = 0; i < 8; i++) newAddr[i] = alarmSearchAddress[i];
-  return true;
-}
-
-// returns true if device address has an alarm condition
-// TODO: can this be done with only TEMP_MSB REGISTER (faster)
-//       if ((char) scratchPad[TEMP_MSB] <= (char) scratchPad[LOW_ALARM_TEMP]) return true;
-//       if ((char) scratchPad[TEMP_MSB] >= (char) scratchPad[HIGH_ALARM_TEMP]) return true;
-bool DallasTemperature::hasAlarm(uint8_t* deviceAddress)
-{
-  ScratchPad scratchPad;
-  if (isConnected(deviceAddress, scratchPad))
-  {
-    float temp = calculateTemperature(deviceAddress, scratchPad);
-
-    // check low alarm
-    if ((char)temp <= (char)scratchPad[LOW_ALARM_TEMP]) return true;
-
-    // check high alarm
-    if ((char)temp >= (char)scratchPad[HIGH_ALARM_TEMP]) return true;
-  }
-
-  // no alarm
-  return false;
-}
-
-// returns true if any device is reporting an alarm condition on the bus
-bool DallasTemperature::hasAlarm(void)
-{
-  DeviceAddress deviceAddress;
-  resetAlarmSearch();
-  return alarmSearch(deviceAddress);
-}
-
-// runs the alarm handler for all devices returned by alarmSearch()
-void DallasTemperature::processAlarms(void)
-{
-  resetAlarmSearch();
-  DeviceAddress alarmAddr;
-
-  while (alarmSearch(alarmAddr))
-  {
-    if (validAddress(alarmAddr))
-      _AlarmHandler(alarmAddr);
-  }
-}
-
-// sets the alarm handler
-void DallasTemperature::setAlarmHandler(AlarmHandler *handler)
-{
-  _AlarmHandler = handler;
-}
-
-// The default alarm handler
-void DallasTemperature::defaultAlarmHandler(uint8_t* deviceAddress)
-{
-}
-
-#endif
 
 // Convert float celsius to fahrenheit
 float DallasTemperature::toFahrenheit(float celsius)
