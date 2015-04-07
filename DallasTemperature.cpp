@@ -358,14 +358,15 @@ bool DallasTemperature::requestTemperaturesByAddress(uint8_t index)
 
 void DallasTemperature::blockTillConversionComplete(uint8_t* bitResolution, uint8_t index)
 {
-	delay(1000);
+	/*
 	if (checkForConversion && !parasite)
 	{
 	  	// Continue to check if the IC has responded with a temperature
 	  	// NB: Could cause issues with multiple devices (one device may respond faster)
 	  	unsigned long start = millis();
-		while(!isConversionAvailable(0) && ((millis() - start) < 750));	
+		while(!isConversionAvailable(index) && ((millis() - start) < 750));	
 	}
+	*/
 	
   	// Wait a fix number of cycles till conversion is complete (based on IC datasheet)
 	  switch (*bitResolution)
