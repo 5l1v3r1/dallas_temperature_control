@@ -50,15 +50,17 @@
 // Error Codes
 #define DEVICE_DISCONNECTED -127
 
-#define MAX_DEVICES	10 //Max # of 1-wire temperature sensors to track.
+#define MAX_DEVICES	6 //Max # of 1-wire temperature sensors to track.
 
 typedef uint8_t DeviceAddress[8];
 
 typedef struct 
 {
-	int16_t minTemp, maxTemp, avgTemp, currentTemp; //all turned into hundredths of a degree C
+	int16_t minTemp, maxTemp, avgTemp, currentTemp;
 	DeviceAddress address;
 	int32_t avgTempAccumulator;
+	uint16_t avgTempReadings;
+	int16_t offset;
 } TemperatureSensor;
 
 class DallasTemperature
@@ -78,6 +80,8 @@ class DallasTemperature
   
   // returns true if address is valid
   bool validAddress(uint8_t*);
+
+  bool readSensor(uint8_t);
   
   // attempt to determine if the device at the given address is connected to the bus
   bool isConnected(uint8_t);
@@ -117,12 +121,6 @@ class DallasTemperature
   
   // sends command for all devices on the bus to perform a temperature conversion 
   void requestTemperatures(void);
-   
-  // sends command for one device to perform a temperature conversion by address
-  bool requestTemperaturesByAddress(uint8_t);
-
-  // sends command for one device to perform a temperature conversion by index
-  bool requestTemperaturesByIndex(uint8_t);
 
   // returns temperature in degrees C
   float getTempC(uint8_t);
@@ -130,11 +128,11 @@ class DallasTemperature
   // returns temperature in degrees F
   float getTempF(uint8_t);
 
-  // Get temperature for device index (slow)
-  float getTempCByIndex(uint8_t);
-  
-  // Get temperature for device index (slow)
-  float getTempFByIndex(uint8_t);
+  //Get temperature in hundredths of a degree C
+  int16_t getCelsius(uint8_t);
+
+  //Get Temperature in hundredths of a degree F
+  int16_t getFahrenheit(uint8_t);
   
   // returns true if the bus requires parasite power
   bool isParasitePowerMode(void);

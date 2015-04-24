@@ -46,6 +46,7 @@ void DallasTemperature::begin(void)
 	  sensors[devices].maxTemp = 0;
 	  sensors[devices].avgTemp = 0;
 	  sensors[devices].avgTempAccumulator = 0;
+	  sensors[devices].offset = 0;
 
       if (!parasite && readPowerSupply(devices)) parasite = true;
 
@@ -69,6 +70,12 @@ uint8_t DallasTemperature::getDeviceCount(void)
 bool DallasTemperature::validAddress(uint8_t* deviceAddress)
 {
   return (_wire->crc8(deviceAddress, 7) == deviceAddress[7]);
+}
+
+bool DallasTemperature::readSensor(uint8_t index)
+{
+  ScratchPad scratchPad;
+  return isConnected(index, scratchPad);
 }
 
 // attempt to determine if the device at the given address is connected to the bus
@@ -154,15 +161,44 @@ void DallasTemperature::readScratchPad(uint8_t index, uint8_t* scratchPad)
   // SCTRACHPAD_CRC
   scratchPad[SCRATCHPAD_CRC] = _wire->read();
 
-  returnedTemp = (int16_t)scratchPad[TEMP_LSB] + (scratchPad[TEMP_MSB] * 256);
+  returnedTemp = (((int16_t)scratchPad[TEMP_MSB]) << 8) | scratchPad[TEMP_LSB];
+   
+  //this value will end up being in hundredths of a degree
+  temp = ((int32_t)returnedTemp) * 100;
+  temp >>= 4;
 
-  //returnedTemp now stores the raw value which is either in 1/2, 1/4, 1/8, or 1/16 of a degree. Need to figure that out and scale up to hundredths of a degree instead
-  temp = (int32_t)returnedTemp * 100;
-  temp /= (1 << (bitResolution - 8));
+  if (temp < -3000 && sensors[index].offset == 0) sensors[index].offset = 5500;
+  sensors[index].currentTemp = ((int16_t)temp) + sensors[index].offset;
 
-  sensors[index].currentTemp = (int16_t) temp;
+  if (temp > sensors[index].maxTemp) sensors[index].maxTemp = temp;
+  if (temp < sensors[index].minTemp) sensors[index].minTemp = temp;
+  sensors[index].avgTempAccumulator += temp;
+  sensors[index].avgTempReadings++;
+  sensors[index].avgTemp = sensors[index].avgTempAccumulator / sensors[index].avgTempReadings; //a long, long operation on an 8 bit processor...
+
+  //Now, if we've gotten to 10,000 readings then divide by two for both the readings and the accumulator.
+  //That way we don't average forever. Tweak the base number here to make it as responsive as you want.
+  if (sensors[index].avgTempReadings > 10000) 
+  {
+	  sensors[index].avgTempReadings /= 2;
+	  sensors[index].avgTempAccumulator /= 2;
+  }
 
   _wire->reset();
+}
+
+int16_t DallasTemperature::getCelsius(uint8_t index)
+{
+	return sensors[index].currentTemp;
+}
+
+int16_t DallasTemperature::getFahrenheit(uint8_t index)
+{
+	int32_t temp;
+	temp = sensors[index].currentTemp;
+	temp *= 10;
+	temp /= 18;
+	return ((int16_t)temp);
 }
 
 // writes device's scratch pad
@@ -332,30 +368,6 @@ void DallasTemperature::requestTemperatures()
   return;
 }
 
-// sends command for one device to perform a temperature by address
-// returns FALSE if device is disconnected
-// returns TRUE  otherwise
-bool DallasTemperature::requestTemperaturesByAddress(uint8_t index)
-{
-  if (index >= devices) index = 0;
-  _wire->reset();
-  _wire->select(sensors[index].address);
-  _wire->write(STARTCONVO, parasite);
-  
-    // check device
-  ScratchPad scratchPad;
-  if (!isConnected(index, scratchPad)) return false;
-  
-  
-  // ASYNC mode?
-  if (!waitForConversion) return true;   
-  uint8_t bitResolution = getResolution(index);
-  blockTillConversionComplete(&bitResolution, index);
-  
-  return true;
-}
-
-
 void DallasTemperature::blockTillConversionComplete(uint8_t* bitResolution, uint8_t index)
 {
 	/*
@@ -386,24 +398,6 @@ void DallasTemperature::blockTillConversionComplete(uint8_t* bitResolution, uint
 	      break;
 	  }
 
-}
-
-// sends command for one device to perform a temp conversion by index
-bool DallasTemperature::requestTemperaturesByIndex(uint8_t deviceIndex)
-{
-  return requestTemperaturesByAddress(deviceIndex);
-}
-
-// Fetch temperature for device index
-float DallasTemperature::getTempCByIndex(uint8_t deviceIndex)
-{
-  return getTempC(deviceIndex);
-}
-
-// Fetch temperature for device index
-float DallasTemperature::getTempFByIndex(uint8_t deviceIndex)
-{
-  return toFahrenheit(getTempCByIndex(deviceIndex));
 }
 
 // reads scratchpad and returns the temperature in degrees C
@@ -454,26 +448,14 @@ float DallasTemperature::calculateTemperature(uint8_t index, uint8_t* scratchPad
   }
 }
 
-// returns temperature in degrees C or DEVICE_DISCONNECTED if the
-// device's scratch pad cannot be read successfully.
-// the numeric value of DEVICE_DISCONNECTED is defined in
-// DallasTemperature.h. It is a large negative number outside the
-// operating range of the device
+// returns temperature in degrees C
 float DallasTemperature::getTempC(uint8_t index)
 {
   if (index >= devices) index = 0;
-  // TODO: Multiple devices (up to 64) on the same bus may take 
-  //       some time to negotiate a response
-  // What happens in case of collision?
-
-  ScratchPad scratchPad;
-  if (isConnected(index, scratchPad)) return calculateTemperature(index, scratchPad);
-  return DEVICE_DISCONNECTED;
+  return (sensors[index].currentTemp / 100.0f);
 }
 
 // returns temperature in degrees F
-// TODO: - when getTempC returns DEVICE_DISCONNECTED 
-//        -127 gets converted to -196.6 F
 float DallasTemperature::getTempF(uint8_t index)
 {
   return toFahrenheit(getTempC(index));
