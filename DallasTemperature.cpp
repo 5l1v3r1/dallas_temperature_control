@@ -42,10 +42,7 @@ void DallasTemperature::begin(void)
     if (validAddress(deviceAddress))
     {
 	  for (count = 0; count < 8; count++) sensors[devices].address[count] = deviceAddress[count];
-	  sensors[devices].minTemp = 0;
-	  sensors[devices].maxTemp = 0;
-	  sensors[devices].avgTemp = 0;
-	  sensors[devices].avgTempAccumulator = 0;
+	  resetStats(devices);
 	  sensors[devices].offset = 0;
 
       if (!parasite && readPowerSupply(devices)) parasite = true;
@@ -59,6 +56,21 @@ void DallasTemperature::begin(void)
     }
   }
 }
+
+void DallasTemperature::resetStats(uint8_t)
+{
+	sensors[devices].minTemp = 9000;
+	sensors[devices].maxTemp = -9000;
+	sensors[devices].avgTemp = 0;
+	sensors[devices].avgTempAccumulator = 0;
+	sensors[devices].avgTempReadings = 0;
+}
+
+void DallasTemperature::resetStats()
+{
+	for (int i = 0; i < devices; i++) resetStats(i);
+}
+
 
 // returns the number of devices found on the bus
 uint8_t DallasTemperature::getDeviceCount(void)
@@ -168,7 +180,8 @@ void DallasTemperature::readScratchPad(uint8_t index, uint8_t* scratchPad)
   temp >>= 4;
 
   if (temp < -3000 && sensors[index].offset == 0) sensors[index].offset = 5500;
-  sensors[index].currentTemp = ((int16_t)temp) + sensors[index].offset;
+  temp += sensors[index].offset;
+  sensors[index].currentTemp = ((int16_t)temp);
 
   if (temp > sensors[index].maxTemp) sensors[index].maxTemp = temp;
   if (temp < sensors[index].minTemp) sensors[index].minTemp = temp;
@@ -459,6 +472,24 @@ float DallasTemperature::getTempC(uint8_t index)
 float DallasTemperature::getTempF(uint8_t index)
 {
   return toFahrenheit(getTempC(index));
+}
+
+float DallasTemperature::getMaxTempC(uint8_t index) 
+{
+	if (index >= devices) index = 0;
+	return (sensors[index].maxTemp / 100.0f);
+}
+
+float DallasTemperature::getMinTempC(uint8_t index) 
+{
+	if (index >= devices) index = 0;
+	return (sensors[index].minTemp / 100.0f);
+}
+
+float DallasTemperature::getAvgTempC(uint8_t index) 
+{
+	if (index >= devices) index = 0;
+	return (sensors[index].avgTemp / 100.0f);
 }
 
 // returns true if the bus requires parasite power

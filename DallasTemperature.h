@@ -128,6 +128,13 @@ class DallasTemperature
   // returns temperature in degrees F
   float getTempF(uint8_t);
 
+  float getMaxTempC(uint8_t);
+  float getMinTempC(uint8_t);
+  float getAvgTempC(uint8_t);
+  void resetStats(uint8_t);
+  void resetStats();
+
+
   //Get temperature in hundredths of a degree C
   int16_t getCelsius(uint8_t);
 
