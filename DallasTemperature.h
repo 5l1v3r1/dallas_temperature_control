@@ -52,7 +52,7 @@
 
 #define MAX_DEVICES	6 //Max # of 1-wire temperature sensors to track.
 
-typedef uint8_t DeviceAddress[8];
+typedef uint8_t DeviceAddress[6];
 
 typedef struct 
 {
@@ -61,6 +61,9 @@ typedef struct
 	int32_t avgTempAccumulator;
 	uint16_t avgTempReadings;
 	int16_t offset;
+	int8_t lowTempFault;
+	int8_t highTempFault;
+	uint8_t faults;
 } TemperatureSensor;
 
 class DallasTemperature
@@ -133,6 +136,9 @@ class DallasTemperature
   float getAvgTempC(uint8_t);
   void resetStats(uint8_t);
   void resetStats();
+  void setLowFaultTemp(uint8_t, int8_t);
+  void setHighFaultTemp(uint8_t, int8_t);
+  uint8_t isFaulted(uint8_t);
 
 
   //Get temperature in hundredths of a degree C

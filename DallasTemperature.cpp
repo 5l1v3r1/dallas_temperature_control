@@ -57,18 +57,40 @@ void DallasTemperature::begin(void)
   }
 }
 
-void DallasTemperature::resetStats(uint8_t)
+void DallasTemperature::resetStats(uint8_t device)
 {
-	sensors[devices].minTemp = 9000;
-	sensors[devices].maxTemp = -9000;
-	sensors[devices].avgTemp = 0;
-	sensors[devices].avgTempAccumulator = 0;
-	sensors[devices].avgTempReadings = 0;
+	sensors[device].minTemp = 9000;
+	sensors[device].maxTemp = -9000;
+	sensors[device].avgTemp = 0;
+	sensors[device].avgTempAccumulator = 0;
+	sensors[device].avgTempReadings = 0;
+	sensors[device].lowTempFault = -120;
+	sensors[device].highTempFault = 120;
+	sensors[device].faults = 0;
 }
 
 void DallasTemperature::resetStats()
 {
 	for (int i = 0; i < devices; i++) resetStats(i);
+}
+
+void DallasTemperature::setLowFaultTemp(uint8_t index, int8_t temp)
+{
+	if (index >= devices) return;
+	sensors[index].lowTempFault = temp;
+}
+
+void DallasTemperature::setHighFaultTemp(uint8_t index, int8_t temp)
+{
+	if (index >= devices) return;
+	sensors[index].highTempFault = temp;
+}
+
+uint8_t DallasTemperature::isFaulted(uint8_t index)
+{
+	if (index >= devices) return 0;
+	if (sensors[index].faults >= 10) return 1;
+	return 0;
 }
 
 
@@ -183,15 +205,21 @@ void DallasTemperature::readScratchPad(uint8_t index, uint8_t* scratchPad)
   temp += sensors[index].offset;
   sensors[index].currentTemp = ((int16_t)temp);
 
-  if (temp > sensors[index].maxTemp) sensors[index].maxTemp = temp;
-  if (temp < sensors[index].minTemp) sensors[index].minTemp = temp;
+  if ((temp/100) > sensors[index].maxTemp) sensors[index].maxTemp = temp;
+  if ((temp/100) < sensors[index].minTemp) sensors[index].minTemp = temp;
+
+  if (temp > sensors[index].highTempFault) sensors[index].faults++;
+  else if (temp < sensors[index].lowTempFault) sensors[index].faults++;
+  else if (sensors[index].faults > 0) sensors[index].faults--;
+  if (sensors[index].faults > 40) sensors[index].faults = 40;
+  
   sensors[index].avgTempAccumulator += temp;
   sensors[index].avgTempReadings++;
   sensors[index].avgTemp = sensors[index].avgTempAccumulator / sensors[index].avgTempReadings; //a long, long operation on an 8 bit processor...
 
-  //Now, if we've gotten to 10,000 readings then divide by two for both the readings and the accumulator.
+  //Now, if we've gotten to 1,000 readings then divide by two for both the readings and the accumulator.
   //That way we don't average forever. Tweak the base number here to make it as responsive as you want.
-  if (sensors[index].avgTempReadings > 10000) 
+  if (sensors[index].avgTempReadings > 1000) 
   {
 	  sensors[index].avgTempReadings /= 2;
 	  sensors[index].avgTempAccumulator /= 2;
