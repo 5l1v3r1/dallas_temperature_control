@@ -52,18 +52,18 @@
 
 #define MAX_DEVICES	6 //Max # of 1-wire temperature sensors to track.
 
-typedef uint8_t DeviceAddress[6];
+typedef uint8_t DeviceAddress[8];
 
 typedef struct 
 {
-	int16_t minTemp, maxTemp, avgTemp, currentTemp;
-	DeviceAddress address;
+	int16_t minTemp, maxTemp, avgTemp, currentTemp;	
 	int32_t avgTempAccumulator;
 	uint16_t avgTempReadings;
 	int16_t offset;
 	int8_t lowTempFault;
 	int8_t highTempFault;
 	uint8_t faults;
+	DeviceAddress address;
 } TemperatureSensor;
 
 class DallasTemperature

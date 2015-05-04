@@ -41,8 +41,8 @@ void DallasTemperature::begin(void)
   {
     if (validAddress(deviceAddress))
     {
-	  for (count = 0; count < 8; count++) sensors[devices].address[count] = deviceAddress[count];
 	  resetStats(devices);
+	  for (count = 0; count < 8; count++) sensors[devices].address[count] = deviceAddress[count];
 	  sensors[devices].offset = 0;
 
       if (!parasite && readPowerSupply(devices)) parasite = true;
@@ -133,6 +133,8 @@ void DallasTemperature::readScratchPad(uint8_t index, uint8_t* scratchPad)
 	if (index >= devices) index = 0;
 	int32_t temp;
 	int16_t returnedTemp;
+	int8_t scaledTemp;
+
   // send the command
   _wire->reset();
   _wire->select(sensors[index].address);
@@ -205,11 +207,12 @@ void DallasTemperature::readScratchPad(uint8_t index, uint8_t* scratchPad)
   temp += sensors[index].offset;
   sensors[index].currentTemp = ((int16_t)temp);
 
-  if ((temp/100) > sensors[index].maxTemp) sensors[index].maxTemp = temp;
-  if ((temp/100) < sensors[index].minTemp) sensors[index].minTemp = temp;
+  if ((temp) > sensors[index].maxTemp) sensors[index].maxTemp = temp;
+  if ((temp) < sensors[index].minTemp) sensors[index].minTemp = temp;
 
-  if (temp > sensors[index].highTempFault) sensors[index].faults++;
-  else if (temp < sensors[index].lowTempFault) sensors[index].faults++;
+  scaledTemp = temp / 100;
+  if (scaledTemp > sensors[index].highTempFault) sensors[index].faults++;
+  else if (scaledTemp < sensors[index].lowTempFault) sensors[index].faults++;
   else if (sensors[index].faults > 0) sensors[index].faults--;
   if (sensors[index].faults > 40) sensors[index].faults = 40;
   
