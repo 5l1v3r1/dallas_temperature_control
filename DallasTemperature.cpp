@@ -106,10 +106,10 @@ bool DallasTemperature::validAddress(uint8_t* deviceAddress)
   return (_wire->crc8(deviceAddress, 7) == deviceAddress[7]);
 }
 
-bool DallasTemperature::readSensor(uint8_t index)
+bool DallasTemperature::readSensor(uint8_t index, uint8_t debug)
 {
   ScratchPad scratchPad;
-  return isConnected(index, scratchPad);
+  return isConnected(index, scratchPad, debug);
 }
 
 // attempt to determine if the device at the given address is connected to the bus
@@ -121,14 +121,14 @@ bool DallasTemperature::isConnected(uint8_t index)
 
 // attempt to determine if the device at the given address is connected to the bus
 // also allows for updating the read scratchpad
-bool DallasTemperature::isConnected(uint8_t index, uint8_t* scratchPad)
+bool DallasTemperature::isConnected(uint8_t index, uint8_t* scratchPad, uint8_t debug)
 {
   readScratchPad(index, scratchPad);
   return (_wire->crc8(scratchPad, 8) == scratchPad[SCRATCHPAD_CRC]);
 }
 
 // read device's scratch pad
-void DallasTemperature::readScratchPad(uint8_t index, uint8_t* scratchPad)
+void DallasTemperature::readScratchPad(uint8_t index, uint8_t* scratchPad, uint8_t debug)
 {
 	if (index >= devices) index = 0;
 	int32_t temp;
@@ -197,7 +197,11 @@ void DallasTemperature::readScratchPad(uint8_t index, uint8_t* scratchPad)
   // SCTRACHPAD_CRC
   scratchPad[SCRATCHPAD_CRC] = _wire->read();
 
+  if (debug < 2) return;
+
   returnedTemp = (((int16_t)scratchPad[TEMP_MSB]) << 8) | scratchPad[TEMP_LSB];
+
+  if (debug < 3) return;
    
   //this value will end up being in hundredths of a degree
   temp = ((int32_t)returnedTemp) * 100;
@@ -207,6 +211,8 @@ void DallasTemperature::readScratchPad(uint8_t index, uint8_t* scratchPad)
   temp += sensors[index].offset;
   sensors[index].currentTemp = ((int16_t)temp);
 
+  if (debug < 4) return;
+
   if ((temp) > sensors[index].maxTemp) sensors[index].maxTemp = temp;
   if ((temp) < sensors[index].minTemp) sensors[index].minTemp = temp;
 
@@ -215,6 +221,8 @@ void DallasTemperature::readScratchPad(uint8_t index, uint8_t* scratchPad)
   else if (scaledTemp < sensors[index].lowTempFault) sensors[index].faults++;
   else if (sensors[index].faults > 0) sensors[index].faults--;
   if (sensors[index].faults > 40) sensors[index].faults = 40;
+
+  if (debug < 5) return;
   
   sensors[index].avgTempAccumulator += temp;
   sensors[index].avgTempReadings++;

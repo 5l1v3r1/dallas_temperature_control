@@ -84,17 +84,17 @@ class DallasTemperature
   // returns true if address is valid
   bool validAddress(uint8_t*);
 
-  bool readSensor(uint8_t);
+  bool readSensor(uint8_t, uint8_t debug = 0xFF);
   
   // attempt to determine if the device at the given address is connected to the bus
   bool isConnected(uint8_t);
 
   // attempt to determine if the device at the given address is connected to the bus
   // also allows for updating the read scratchpad
-  bool isConnected(uint8_t, uint8_t*);
+  bool isConnected(uint8_t, uint8_t*, uint8_t debug = 0xFF);
 
   // read device's scratchpad
-  void readScratchPad(uint8_t, uint8_t*);
+  void readScratchPad(uint8_t, uint8_t*, uint8_t debug = 0xFF);
 
   // write device's scratchpad
   void writeScratchPad(uint8_t, const uint8_t*);
